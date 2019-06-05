@@ -1,0 +1,331 @@
+﻿///////////////////////////////////////////////////////////////////////////////////////
+//
+// WAMBATECH DRAG DROP MANAGER
+//
+// ANY DISPLAY OBJECT CAN USE THIS TO FACILITATE CREATING A COPY OF IT
+// AND PASSING A PAYLOAD TO ANY OBJECT THAT ITS DROPPED ON (ASSUMING THE OBJECT
+// SUPPORTS DRAG DROP).
+//
+// TODO:
+//		DEEP OBJECT COPY
+//		INIT DRAG
+//		FIND OBJECTS UNDER MOUSE
+//		QUERY VALID DROP TARGET
+//		INIT DROP
+//		CLEANUP
+//
+// FUTURE FEATURES:
+//		HIGHLIGHT CURRENT DROP TARGET
+//
+///////////////////////////////////////////////////////////////////////////////////////
+
+package 
+{
+	import flash.display.MovieClip;
+	import flash.events.Event;
+	import flash.display.Bitmap;
+	import flash.display.BitmapData;
+	import flash.display.Sprite;
+	import flash.geom.Point;
+	import fl.transitions.Tween;
+	import fl.transitions.TweenEvent;	
+	import fl.transitions.easing.*; 
+	import flash.events.MouseEvent;
+	import flash.geom.ColorTransform;
+	import flash.utils.Timer;
+	import flash.events.TimerEvent;
+	import flash.utils.getQualifiedClassName;
+	
+	public class DragDropManager extends MovieClip
+	{				
+		public static var dragCopy:Sprite;		
+		public static var objHandle:Object;
+		public static var objDataType:String;
+		public static var objData:Object;
+		public static var dropTargetObject:Object;
+		public static var dropTargets:Array;
+		public static var dragTargets:Array;
+		public static var dragTimer:Timer;
+		public static var finishing:Boolean = false;
+		public static var copyFadeInTween:Tween;
+		public static var originalFadeOutTween:Tween;
+		public static var returnTweenX:Tween;
+		public static var returnTweenY:Tween;
+		public static var returnTweenAlpha:Tween;
+		public static var originalFadeInTween:Tween;
+		
+		public static function registerDropObject(whatObject:Object, theDataType:String):void
+		{
+			if (dropTargets == null)
+				dropTargets = new Array();
+				
+			dropTargets.push({object: whatObject, dataType: theDataType});
+		}
+		
+		public static function unRegisterDropObject(whatObject:Object):void
+		{
+			if (dropTargets == null)
+				return;
+				
+			for (var i:int = 0; i < dropTargets.length; i++)
+			{
+				if (dropTargets[i].object == whatObject)
+				{
+					dropTargets.splice(i, 1)
+					break;
+				}
+			}
+		}
+		
+		public static function registerDraggableObject(whatObject:Object, theDataType:String, theData:Object):void
+		{
+			if (dragTargets == null)
+				dragTargets = new Array();
+				
+			dragTargets.push({object: whatObject, dataType: theDataType, data: theData});
+			
+			whatObject.addEventListener(MouseEvent.MOUSE_DOWN, dragStart);
+		}
+		
+		public static function unRegisterDraggableObject(whatObject:Object):void
+		{
+			whatObject.removeEventListener(MouseEvent.MOUSE_DOWN, dragStart);
+			
+			for (var i:int = 0; i < dragTargets.length; i++)
+			{
+				if (dragTargets[i].object == whatObject)
+				{
+					dropTargets.splice(i, 1)
+					break;
+				}
+			}
+		}
+		
+		public static function updateData(whatObject:Object, theData:Object)
+		{
+			for (var i:int = 0; i < dragTargets.length; i++)
+			{
+				if (dragTargets[i].object == whatObject)
+				{
+					dragTargets[i].data = theData
+					break;
+				}
+			}
+		}
+		
+		private static function dragStart(event:MouseEvent):void
+		{
+			//trace(getQualifiedClassName(event.target));
+			if (getQualifiedClassName(event.target) == "flash.text::TextField")
+			{
+				startDragDrop(event.target.parent);				
+			} else {
+				startDragDrop(event.target);
+			}
+			
+			event.target.stage.addEventListener(MouseEvent.MOUSE_UP, dragStop);
+		}
+		
+		private static function dragStop(event:MouseEvent):void
+		{
+			stopDragDrop();
+		}
+		
+		public static function startDragDrop(whatObject:Object):void
+		{						
+			for (var i:int = 0; i < dragTargets.length; i++)
+			{
+				if (dragTargets[i].object == whatObject)
+				{
+					objDataType = dragTargets[i].dataType;
+					objData = dragTargets[i].data;
+					break;
+				}
+			}
+		
+			if (finishing)
+				finishDragDrop();
+		
+			var tmpBitmapData:BitmapData = new BitmapData(whatObject.width, whatObject.height);
+			tmpBitmapData.draw(whatObject as MovieClip);
+			var dragCopyBMP:Bitmap = new Bitmap(tmpBitmapData);
+			
+			dragCopy = new Sprite();
+			dragCopy.mouseEnabled  = false;
+			dragCopy.addChild(dragCopyBMP);
+			dragCopy.alpha = 0.5;
+			dragCopy.startDrag();
+			
+			var newPos:Point = whatObject.parent.localToGlobal(new Point(whatObject.x, whatObject.y));
+						
+			dragCopy.x = newPos.x;
+			dragCopy.y = newPos.y;
+			
+			objHandle = whatObject;
+			
+			objHandle.stage.addChild(dragCopy);
+			
+			if (copyFadeInTween != null)
+				copyFadeInTween.stop();
+				
+			if (originalFadeOutTween != null)
+				originalFadeOutTween.stop();
+			
+			copyFadeInTween = new Tween(dragCopy, "alpha", Strong.easeOut, dragCopy.alpha, 0.5, 2, true);
+			originalFadeOutTween = new Tween(objHandle, "alpha", Strong.easeOut, objHandle.alpha, 0.5, 2, true);
+			
+			highlightDropTargets();
+			
+			if (dragTimer == null)
+			{
+				dragTimer = new Timer(100, 0);
+				dragTimer.addEventListener(TimerEvent.TIMER, dragTimerHandler);
+			}
+			
+			dragTimer.start();
+		}
+				
+		public static function stopDragDrop():void
+		{
+			objHandle.stage.removeEventListener(MouseEvent.MOUSE_UP, dragStop);
+						
+			dragTimer.stop();
+			finishing = true;
+			dragCopy.stopDrag();
+			unHighlightDropTargets();
+						
+			if (dropTargetObject == null)
+			{			
+				var newPos:Point = objHandle.parent.localToGlobal(new Point(objHandle.x, objHandle.y));
+				
+				if (returnTweenX != null)
+					returnTweenX.stop();
+					
+				if (returnTweenY != null)
+					returnTweenY.stop();
+					
+				if (returnTweenAlpha != null)
+					returnTweenAlpha.stop();
+				
+				returnTweenX = new Tween(dragCopy, "x", Strong.easeOut, dragCopy.x, newPos.x, .5, true);
+				returnTweenY = new Tween(dragCopy, "y", Strong.easeOut, dragCopy.y, newPos.y, .5, true);
+				returnTweenAlpha = new Tween(dragCopy, "alpha", Strong.easeOut, dragCopy.alpha, 0, .5, true);
+				
+				returnTweenAlpha.addEventListener(TweenEvent.MOTION_FINISH, finishDragDrop);
+										
+				if (originalFadeOutTween != null)
+					originalFadeOutTween.stop();
+				
+				if (originalFadeInTween != null)
+					originalFadeInTween.stop();
+					
+				originalFadeInTween = new Tween(objHandle, "alpha", Strong.easeOut, objHandle.alpha, 1, .5, true);
+			} else {
+				dropTargetObject["dataDropped"](objData);
+				
+				objHandle.alpha = 1;
+				finishDragDrop();
+			}
+			
+			
+		}
+		
+		public static function finishDragDrop(event:TweenEvent = null):void
+		{			
+			if (finishing == false || dragCopy.numChildren < 1)
+				return;
+			
+			finishing = false;
+			
+			if (returnTweenX != null)
+				returnTweenX.stop();
+				
+			if (returnTweenY != null)
+				returnTweenY.stop();
+				
+			if (returnTweenAlpha != null)
+				returnTweenAlpha.stop();
+				
+			if (originalFadeOutTween != null)
+				originalFadeOutTween.stop();
+			
+			if (originalFadeInTween != null)
+				originalFadeInTween.stop();
+				
+			if (copyFadeInTween != null)
+				copyFadeInTween.stop();
+				
+			if (originalFadeOutTween != null)
+				originalFadeOutTween.stop();
+				
+			dragCopy.removeChildAt(0);
+			objHandle.stage.removeChild(dragCopy);			
+			objHandle = null;
+			objDataType = null;
+			objData = null;
+			dropTargetObject = null;
+		}
+		
+		public static function dragTimerHandler(event:TimerEvent):void
+		{
+			highlightDropTargets();
+			dropTargetObject = null;
+			
+			var draggingOver:Object = findDropTarget(objHandle);
+			if (draggingOver != null)
+			{
+				dropTargetObject = draggingOver;
+				var testClipTransform:ColorTransform = new ColorTransform(0, 0, 0, 0, 255, 100, 0, 100);
+				draggingOver.transform.colorTransform = testClipTransform;
+			}			
+		}
+		
+		public static function highlightDropTargets():void
+		{
+			if (dropTargets == null)
+				return;
+			
+			if (dropTargets.length == 0)
+				return;
+			
+			var highLightColorTransform:ColorTransform = new ColorTransform(0, 0, 0, 0, 100, 0, 0, 100);
+			
+			for (var i:int = 0; i < dropTargets.length; i++)
+			{
+				if (dropTargets[i].dataType == objDataType)
+					dropTargets[i].object.transform.colorTransform = highLightColorTransform;
+			}
+		}
+		
+		public static function unHighlightDropTargets():void
+		{			
+			if (dropTargets == null)
+				return;
+				
+			if (dropTargets.length == 0)
+				return;
+				
+			for (var i:int = 0; i < dropTargets.length; i++)
+			{
+				dropTargets[i].object.transform.colorTransform = new ColorTransform();
+			}
+		}
+		
+		public static function findDropTarget(draggedObject:Object):Object
+		{			
+			if (dropTargets == null)
+				return null;
+			
+			if (dropTargets.length == 0)
+				return null;
+		
+			for (var i:int = 0; i < dropTargets.length; i++)
+			{
+				if (dropTargets[i].dataType == objDataType && dropTargets[i].object.hitTestObject(dragCopy) && draggedObject != dropTargets[i].object)
+					return  dropTargets[i].object;
+			}
+			
+			return null;
+		}
+	}
+}

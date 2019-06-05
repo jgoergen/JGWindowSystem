@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+
+    <style type="text/css">
+
+        body { 
+            background-color: #000;
+        }
+
+    </style>
+
+    <title>JG.Windows Demo</title>
+</head>
+
+<body>
+
+    <script type="text/javascript" src="./JG.Point.js"></script>
+    <script type="text/javascript" src="./JG.Window.js"></script>
+    <script type="text/javascript" src="./JG.WindowManager.js"></script>
+
+    <script type='text/javascript'>
+
+        // SETTINGS /////////////////////////////
+
+        ////////////////////////////////////////
+
+        let pause = false;
+
+        function init() {
+
+            requestAnimationFrame(update);
+        }
+
+        function update() {
+
+            if (pause == true) return;
+
+
+            requestAnimationFrame(update);
+        }
+
+        window.onload = init;
+
+    </script>
+</body>
+
+</html>
